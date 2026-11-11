@@ -1,6 +1,7 @@
 import json
 import requests
 import time
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -10,11 +11,11 @@ from confluent_kafka import Producer
 API_BASE = "https://hacker-news.firebaseio.com/v0"
 
 # file used to save the last processed Hacker News item ID
-STATE_FILE = Path("producer_state.json")
+# STATE_FILE = Path("producer_state.json") commented out for now
 
 # Kafka broker address and destination topic
-KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
-KAFKA_TOPIC = "topic1"
+# KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+# KAFKA_TOPIC = "topic1"
 
 def get_json(session, url):
     # send a GET request and return the JSON response
@@ -83,30 +84,47 @@ def extract_message(item):
     }
 
 
-def load_last_id():
-    if not STATE_FILE.exists():
+def load_last_id(state_file):
+    if not state_file.exists():
         return None
 
-    with STATE_FILE.open("r", encoding="utf-8") as file:
+    # read the previously saved item ID
+    with state_file.open("r", encoding="utf-8") as file:
         state = json.load(file)
 
-    # return the saved last processed item ID
     return state.get("last_id")
 
 
-def save_last_id(last_id):
+def save_last_id(state_file, last_id):
+    # create the parent directory if necessary
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+
     # create a temporary state file
-    temp_file = STATE_FILE.with_suffix(".tmp")
+    temp_file = state_file.with_suffix(".tmp")
 
     # write the latest processed ID to the temporary file
     with temp_file.open("w", encoding="utf-8") as file:
         json.dump({"last_id": last_id}, file)
 
-    # replace the previous state file with the new one
-    temp_file.replace(STATE_FILE)
+    # replace the previous state file
+    temp_file.replace(state_file)
 
 
-def publish_message(producer, message):
+def save_message(message, output_path):
+    '''
+    stores messages in a .jsonl
+    '''
+    # create the output directory if it does not exist
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # open the dataset in append mode
+    with output_path.open("a", encoding="utf-8") as file:
+        # serialize the message and write it on a separate line
+        file.write(json.dumps(message, ensure_ascii=False) + "\n")
+
+
+
+def publish_message(producer, message, topic):
     # track whether Kafka successfully received the message
     delivery = {"confirmed": False, "error": None}
 
@@ -120,7 +138,7 @@ def publish_message(producer, message):
 
     # send the message to topic1 using its item ID as the key
     producer.produce(
-        topic=KAFKA_TOPIC,
+        topic=topic,
         key=str(message["id"]).encode("utf-8"),
         value=message_json,
         callback=delivery_callback
@@ -135,12 +153,59 @@ def publish_message(producer, message):
             f"failed to publish item {message['id']}: {delivery['error']}"
         )
 
+def parse_args():
+    # create the command-line argument parser
+    parser = argparse.ArgumentParser(
+        description="Hacker News Kafka producer"
+    )
 
+    # specify the Kafka broker address
+    parser.add_argument(
+        "--bootstrap-servers",
+        default="localhost:9092"
+    )
+
+    # specify the destination Kafka topic
+    parser.add_argument(
+        "--topic",
+        default="topic1"
+    )
+
+    # specify the number of seconds between API polls
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0
+    )
+
+    # specify the file used for persistent state tracking
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        default=Path("producer_state.json")
+    )
+    
+    # specify the output file for collected messages
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data/messages.jsonl")
+    )
+
+    # parse and validate the supplied arguments
+    args = parser.parse_args()
+
+    if args.interval <= 0:
+        parser.error("--interval must be greater than zero")
+
+    return args
 
 def main():
+    args = parse_args()
+
     # initialize the Kafka producer
     producer = Producer({
-        "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
+        "bootstrap.servers": args.bootstrap_servers,
         "acks": "all",
         "enable.idempotence": True
     })
@@ -149,12 +214,12 @@ def main():
     with requests.Session() as session:
 
         # try to restore the previously saved item ID
-        last_id = load_last_id()
+        last_id = load_last_id(args.state_file)
 
         # if no saved state exists, start from the current latest item ID
         if last_id is None:
             last_id = get_json(session, f"{API_BASE}/maxitem.json")
-            save_last_id(last_id)
+            save_last_id(args.state_file, last_id)
             print(f"no saved state found so starting from Hacker News item ID: {last_id}")
         else:
             print(f"resuming from saved Hacker News item ID: {last_id}")
@@ -177,18 +242,20 @@ def main():
                     message = extract_message(item)
 
                     if message:
-                        # publish the message to Kafka topic1
-                        publish_message(producer, message)
+                        publish_message(producer, message, args.topic)
 
+                        # save the successfully published message to the local dataset
+                        save_message(message, args.output)
+                        
                         # print confirmation after successful delivery
-                        print(f"published item {item_id} to {KAFKA_TOPIC}")
+                        print(f"published item {item_id} to {args.topic}")
 
                     # update progress only after processing succeeds
                     last_id = item_id
-                    save_last_id(last_id)
+                    save_last_id(args.state_file, last_id)
 
                 # wait before polling again
-                time.sleep(5)
+                time.sleep(args.interval)
 
         except KeyboardInterrupt:
             # gracefully exit when the user presses Ctrl+C

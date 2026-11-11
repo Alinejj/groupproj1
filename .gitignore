@@ -1,3 +1,6 @@
-producer_state.json
 .venv/
 __pycache__/
+producer_state.json
+data/producer_state.json
+data/messages.jsonl
+checkpoints/

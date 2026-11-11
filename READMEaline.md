@@ -32,6 +32,108 @@ Use `docker compose stop` and `docker compose start` to pause and resume Kafka. 
 
 `topic2` (entity counts): `{"entity": "...", "count": N, "updated_at": "..."}`. Each message is the latest running total for that entity.
 
+
+## Producer (`producer.py`)
+
+Continuously fetches new stories and comments from the Hacker News API, removes HTML tags and extra whitespace, and publishes the cleaned text as JSON messages to Kafka (`topic1`). Successfully published messages are also saved locally in JSONL format for batch classification in Part 2.
+
+The producer tracks the last processed Hacker News item ID in a state file, allowing collection to resume after restarting the application. No API key is required.
+
+### Setup
+
+Activate the Python virtual environment and install the producer dependencies:
+
+```bash
+pip install requests beautifulsoup4 confluent-kafka
+```
+
+Make sure Kafka is running and `topic1` has been created using the instructions under **Start Kafka**.
+
+### Run the producer
+
+```bash
+python producer.py
+```
+
+By default, the producer connects to `localhost:9092`, publishes to `topic1`, and polls the Hacker News API every 5 seconds.
+
+To specify custom options:
+
+```bash
+python producer.py --bootstrap-servers localhost:9092 --topic topic1 --interval 5 --state-file producer_state.json --output data/messages.jsonl
+```
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--bootstrap-servers` | No | `localhost:9092` | Kafka broker address |
+| `--topic` | No | `topic1` | Destination Kafka topic |
+| `--interval` | No | `5` | Seconds between API polling cycles |
+| `--state-file` | No | `producer_state.json` | File storing the last processed Hacker News item ID |
+| `--output` | No | `data/messages.jsonl` | File used to save collected messages |
+
+Use `Ctrl+C` to stop the producer. On restart, it resumes from the last saved item ID.
+
+### Message format
+
+Each message published to `topic1` and saved to the JSONL dataset follows this format:
+
+```json
+{
+  "id": 50448813,
+  "text": "Claude Code is accidentally exposing secrets all over GitHub",
+  "timestamp": "2026-11-11T01:40:18+00:00",
+  "source": "hackernews"
+}
+```
+
+- `id`: Unique Hacker News item ID used for tracking processed messages
+- `text`: Cleaned story title, body, or comment text
+- `timestamp`: Original Hacker News publication time in ISO 8601 format
+- `source`: Identifies the data source as Hacker News
+
+### Verify Kafka output
+
+To view messages published to `topic1`:
+
+```bash
+docker exec -it kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic topic1 --from-beginning
+```
+
+Remove `--from-beginning` to consume only newly arriving messages.
+
+### Saved dataset
+
+The producer appends each successfully published message to `data/messages.jsonl`, with one JSON object per line.
+
+To count the collected messages:
+
+```bash
+wc -l data/messages.jsonl
+```
+
+To view the first five messages:
+
+```bash
+head -n 5 data/messages.jsonl
+```
+
+The dataset can be loaded directly into Spark:
+
+```python
+df = spark.read.json("data/messages.jsonl")
+```
+
+At least 1,000 streamed messages are required for Part 2. Empty and duplicate messages should be removed before classification.
+
+### Troubleshooting
+
+- **Kafka connection failure:** Make sure Docker is running, the Kafka container is started, and the configured broker address is correct
+- **No new messages:** The producer only processes Hacker News item IDs newer than its saved position
+- **Missing dataset:** The JSONL output file is created after the first successfully published message
+- **Restarting the producer:** The state file allows collection to resume from the last processed item ID
+- **API/network errors:** The current implementation may terminate if a request fails; automatic retry handling has not yet been implemented
+
+
 ## Streaming app (`streaming_app.py`)
 
 Reads messages from `topic1`, extracts named entities with spaCy (people, organizations, places, nationalities, products and events), keeps a running count per entity, and writes updated counts to `topic2` at every trigger. When a saved PipelineModel is passed with `--model-path`, it also classifies each incoming message into World, Sports, Business or Sci/Tech and prints running counts per class to the console (Part 2, 2.3c).
