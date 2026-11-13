@@ -177,3 +177,75 @@ The AG News training file is available at https://huggingface.co/datasets/fancyz
 - **Laptop freezes or WSL disconnects:** Spark, spaCy and Kafka together need several GB of memory. Close other Docker containers and heavy apps, and run with `--master "local[1]"`.
 - **"Cannot fetch offset" error:** the Kafka topic was reset. Delete the checkpoint folder and restart the app.
 - **"Current batch is falling behind" warning:** harmless. The trigger is shorter than the time a batch takes; use a longer `--trigger`.
+
+
+
+## Elasticsearch, Logstash, and Kibana (Person 3)
+
+This component consumes named-entity counts from Kafka `topic2`, stores them in Elasticsearch, and visualizes the top 10 entities in Kibana.
+
+### Requirements
+
+- Docker Desktop installed and running
+- Project repository cloned locally
+- PowerShell opened in the project directory
+
+### 1. Start Kafka
+
+```powershell
+docker compose up -d
+```
+
+This starts Kafka and creates the project's Docker network.
+
+### 2. Start Elasticsearch
+
+```powershell
+docker run -d --name elasticsearch --network groupproj1_default -p 9200:9200 -e "discovery.type=single-node" -e "xpack.security.enabled=false" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+```
+
+### 3. Start Kibana
+
+```powershell
+docker run -d --name kibana --network groupproj1_default -p 5601:5601 -e "ELASTICSEARCH_HOSTS=http://elasticsearch:9200" docker.elastic.co/kibana/kibana:8.15.0
+```
+
+### 4. Start Logstash
+
+```powershell
+docker run -d --name logstash --network groupproj1_default -v "${PWD}/elastic/logstash.conf:/usr/share/logstash/pipeline/logstash.conf" -e "LS_JAVA_OPTS=-Xms512m -Xmx512m" docker.elastic.co/logstash/logstash:8.15.0
+```
+
+Logstash reads entity-count messages from Kafka `topic2` and sends them to the Elasticsearch index `entity-counts`.
+
+### 5. Verify Elasticsearch
+
+```powershell
+curl.exe -s "http://localhost:9200/entity-counts/_count"
+```
+
+After the producer and Spark streaming application are running and publishing entity counts, this command returns the number of documents in the index.
+
+### 6. Open Kibana
+
+Open `http://localhost:5601` in a browser.
+
+If the saved dashboard is not available:
+
+1. Go to **Stack Management → Saved Objects → Import**.
+2. Select `elastic/export.ndjson`.
+3. Complete the import.
+4. Open the dashboard named `entity countd`.
+
+The `Top 10 Entities` visualization uses:
+
+- Index: `entity-counts`
+- X-axis: Top 10 values of `entity.keyword`
+- Y-axis: Maximum of `count`
+
+Adjust the time range and click **Refresh** to view updated entity counts.
+
+### Files
+
+- `elastic/logstash.conf` — Kafka-to-Elasticsearch Logstash pipeline configuration.
+- `elastic/export.ndjson` — Exported Kibana dashboard and visualization.
