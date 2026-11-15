@@ -1,15 +1,15 @@
 # Hand labels vs. model predictions (2.3b)
 
-- Messages hand-labeled: 49
-- Fit none of the four classes (None of these): 13 (26.5%)
-- Fit one of the four classes: 36
-- **Accuracy on messages that fit one of the four classes: 27/36 = 75.0%**
+- Messages hand-labeled: 50
+- Fit none of the four classes (None of these): 13 (26.0%)
+- Fit one of the four classes: 37
+- **Accuracy on messages that fit one of the four classes: 28/37 = 75.7%**
 
 ## Confusion matrix (rows = hand label, columns = model prediction)
 
 | Hand \ Predicted | World | Sports | Business | Sci/Tech |
 |---|---:|---:|---:|---:|
-| World | 2 | 0 | 2 | 1 |
+| World | 3 | 0 | 2 | 1 |
 | Sports | 0 | 0 | 0 | 0 |
 | Business | 1 | 2 | 5 | 1 |
 | Sci/Tech | 1 | 1 | 0 | 20 |
@@ -19,7 +19,7 @@
 
 | Hand label | Messages | Model correct |
 |---|---:|---:|
-| World | 5 | 2 (40%) |
+| World | 6 | 3 (50%) |
 | Business | 9 | 5 (56%) |
 | Sci/Tech | 22 | 20 (91%) |
 
