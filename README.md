@@ -1,6 +1,6 @@
 # CS4371 Group Project 1: Spark Streaming with Kafka and Text Classification
 
-Team [number]: [names]
+Team 46: Orvin Ahmed, Aline Jouaidi, Raisa Reza, Sai Laasya Ankem
 
 This project collects live text from Hacker News, counts the named entities being mentioned in real time, visualizes the top 10 in Kibana, and classifies the same messages with a Spark MLlib model trained on AG News.
 
